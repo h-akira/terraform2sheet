@@ -91,13 +91,29 @@ def extract_resources(plan_data):
     return resources
 
 
-def process_resources(resources, resource_schemas):
+def extract_configuration(plan_data):
+    """Extract configuration (including expressions/references) from plan.json"""
+    config_root = plan_data.get('configuration', {}).get('root_module', {})
+    config_resources = config_root.get('resources', [])
+
+    # Build a map: address -> configuration
+    config_map = {}
+    for resource in config_resources:
+        address = resource.get('address')
+        if address:
+            config_map[address] = resource
+
+    return config_map
+
+
+def process_resources(resources, resource_schemas, config_map=None):
     """
     Process all resources and create resource instances.
 
     Args:
         resources: List of resource data from plan.json
         resource_schemas: Schema data for all resource types
+        config_map: Configuration map with expressions/references (optional)
 
     Returns:
         tuple: (resource_registry, skipped_types)
@@ -106,6 +122,9 @@ def process_resources(resources, resource_schemas):
 
     resource_registry = {}
     skipped_types = set()
+
+    if config_map is None:
+        config_map = {}
 
     for resource in resources:
         resource_type = resource.get('type')
@@ -120,6 +139,10 @@ def process_resources(resources, resource_schemas):
         # Get schema for this resource type
         schema = resource_schemas.get(resource_type, {})
 
+        # Get configuration for this resource (if available)
+        resource_address = resource.get('address')
+        config = config_map.get(resource_address, {})
+
         # Convert resource type to class name (e.g., "aws_iam_role" -> "AWS_IAM_ROLE")
         class_name = resource_type.upper()
         resource_class = getattr(aws_resources, class_name, None)
@@ -130,10 +153,14 @@ def process_resources(resources, resource_schemas):
             continue
 
         # Instantiate resource class
-        instance = resource_class(resource, schema=schema, resource_registry=resource_registry)
+        instance = resource_class(
+            resource,
+            schema=schema,
+            resource_registry=resource_registry,
+            config=config
+        )
 
         # Register instance
-        resource_address = resource.get('address')
         if resource_address:
             resource_registry[resource_address] = instance
 
@@ -185,8 +212,8 @@ def generate_output_files(resource_registry, output_prefix):
 
             # Write each resource's table
             for instance in sorted_instances:
-                # Resource section header
-                f.write(f"## {instance.name}\n\n")
+                # Resource section header (format: resource_type.resource_name)
+                f.write(f"## {instance.type}.{instance.name}\n\n")
 
                 # Generate and write table
                 table = instance.gen_table()
@@ -216,8 +243,11 @@ def main():
         resources = extract_resources(plan_data)
         print(f"Found {len(resources)} resources in plan")
 
+        # Extract configuration (including references)
+        config_map = extract_configuration(plan_data)
+
         # Process resources
-        resource_registry, skipped_types = process_resources(resources, resource_schemas)
+        resource_registry, skipped_types = process_resources(resources, resource_schemas, config_map)
         print(f"Processed {len(resource_registry)} supported resources")
 
         if skipped_types:

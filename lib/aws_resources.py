@@ -13,7 +13,10 @@ Each class is responsible for:
 ALL_RESOURCES = [
     "aws_iam_role",
     "aws_iam_policy",
+    "aws_iam_role_policy_attachment",
     "aws_s3_bucket",
+    "aws_s3_bucket_cors_configuration",
+    "aws_s3_bucket_versioning",
 ]
 
 
@@ -25,7 +28,7 @@ class BaseResourceClass:
     priority = 0  # Higher priority resources appear first in the output
     custom_descriptions = {}
 
-    def __init__(self, resource, schema=None, resource_registry=None):
+    def __init__(self, resource, schema=None, resource_registry=None, config=None):
         """
         Initialize resource instance.
 
@@ -33,10 +36,12 @@ class BaseResourceClass:
             resource: Resource data from plan.json
             schema: Schema data from schema.json for this resource type
             resource_registry: Dictionary of all resource instances (for relationships)
+            config: Configuration data with expressions/references from plan.json
         """
         self.resource = resource
         self.schema = schema
         self.resource_registry = resource_registry
+        self.config = config
         self.address = resource.get("address", "")
         self.name = resource.get("name", "")
         self.type = resource.get("type", "")
@@ -291,11 +296,47 @@ class AWS_IAM_ROLE(BaseResourceClass):
         "path": "IAM Roleのパス。デフォルトは/",
         "permissions_boundary": "このRoleに設定するアクセス許可の境界のARN",
         "tags.Name": "リソースの名前を示すタグ",
+        "attached_policies": "このRoleにアタッチされているIAMポリシーのARN一覧",
     }
 
-    def __init__(self, resource, schema=None, resource_registry=None):
-        super().__init__(resource, schema, resource_registry)
+    def __init__(self, resource, schema=None, resource_registry=None, config=None):
+        super().__init__(resource, schema, resource_registry, config)
         self.attached_policies = []  # Will be populated by attachment resources
+
+    def gen_table(self):
+        """
+        Generate markdown table including attached policies.
+        Overrides the base class method to add attached_policies.
+        """
+        # Flatten all values from the resource
+        flattened = self._flatten_values(self.values)
+
+        # Add attached policies to the flattened list
+        if self.attached_policies:
+            for i, policy_arn in enumerate(self.attached_policies):
+                flattened.append({
+                    'key': f'attached_policies[{i}]',
+                    'value': policy_arn
+                })
+
+        if not flattened:
+            return ""
+
+        # Build markdown table
+        lines = []
+        lines.append("| パラメータ | 値 | 必須 | デフォルト | 説明 |")
+        lines.append("|-----------|-----|------|-----------|------|")
+
+        for item in flattened:
+            key = item['key']
+            value = self._format_value(item['value'])
+            required = self._get_required_status(key)
+            default = self._get_default_value(key)
+            description = self._get_description(key)
+
+            lines.append(f"| {key} | {value} | {required} | {default} | {description} |")
+
+        return "\n".join(lines)
 
 
 class AWS_IAM_POLICY(BaseResourceClass):
@@ -329,3 +370,77 @@ class AWS_S3_BUCKET(BaseResourceClass):
         "tags.Name": "リソースの名前を示すタグ",
         "timeouts": "リソース作成・更新・削除のタイムアウト設定",
     }
+
+
+class AWS_S3_BUCKET_CORS_CONFIGURATION(BaseResourceClass):
+    """S3 Bucket CORS Configuration resource"""
+
+    sheet = "S3.md"
+    generate_this_table = True
+    priority = 45  # Medium priority, slightly lower than bucket
+
+    # Custom Japanese descriptions
+    custom_descriptions = {
+        "bucket": "CORS設定を適用するS3バケットのID",
+        "cors_rule": "CORSルールの配列。各ルールは許可されるオリジン、メソッド等を定義",
+        "cors_rule.allowed_headers": "許可されるHTTPヘッダーのリスト。*はすべてのヘッダーを許可",
+        "cors_rule.allowed_methods": "許可されるHTTPメソッド(GET, POST, PUT, DELETE等)",
+        "cors_rule.allowed_origins": "許可されるオリジン(ドメイン)のリスト。*はすべてのオリジンを許可",
+        "cors_rule.expose_headers": "クライアントに公開されるレスポンスヘッダーのリスト",
+        "cors_rule.max_age_seconds": "ブラウザがプリフライトリクエストの結果をキャッシュする秒数",
+    }
+
+
+class AWS_S3_BUCKET_VERSIONING(BaseResourceClass):
+    """S3 Bucket Versioning resource"""
+
+    sheet = "S3.md"
+    generate_this_table = True
+    priority = 45  # Medium priority, slightly lower than bucket
+
+    # Custom Japanese descriptions
+    custom_descriptions = {
+        "bucket": "バージョニング設定を適用するS3バケットのID",
+        "versioning_configuration": "バージョニングの設定",
+        "versioning_configuration.status": "バージョニングのステータス(Enabled/Suspended/Disabled)",
+        "versioning_configuration.mfa_delete": "MFA削除の有効化ステータス",
+    }
+
+
+class AWS_IAM_ROLE_POLICY_ATTACHMENT(BaseResourceClass):
+    """IAM Role Policy Attachment resource (does not generate its own table)"""
+
+    generate_this_table = False  # This resource is integrated into the parent IAM Role
+
+    def __init__(self, resource, schema=None, resource_registry=None, config=None):
+        super().__init__(resource, schema, resource_registry)
+
+        # Extract role and policy information
+        role_name = self.values.get("role")
+        policy_arn = self.values.get("policy_arn")
+
+        # If policy_arn is None, try to get it from configuration references
+        if policy_arn is None and config:
+            expressions = config.get('expressions', {})
+            policy_arn_expr = expressions.get('policy_arn', {})
+            references = policy_arn_expr.get('references', [])
+
+            # references format: ["aws_iam_policy.xxx.arn", "aws_iam_policy.xxx"]
+            if references:
+                # Use the first reference (the full one with .arn)
+                ref = references[0]
+                # Create a pending marker with the resource reference
+                policy_arn = f"(pending) {ref.replace('.arn', '')}"
+
+        # Find the parent IAM Role and add policy info
+        if resource_registry and role_name and policy_arn:
+            # Look up the IAM Role instance by the actual role name (not Terraform resource name)
+            for address, instance in resource_registry.items():
+                if instance.type == "aws_iam_role":
+                    # Compare with the actual IAM role name from values
+                    instance_role_name = instance.values.get("name")
+                    if instance_role_name == role_name:
+                        # Add the policy ARN to the role's attached_policies list
+                        if hasattr(instance, 'attached_policies'):
+                            instance.attached_policies.append(policy_arn)
+                        break
