@@ -23,7 +23,7 @@ ALL_RESOURCES = [
 class BaseResourceClass:
     """Base class for AWS resources with common functionality"""
 
-    sheet = "default.md"
+    view_class = "DefaultView"
     generate_this_table = True
     priority = 0  # Higher priority resources appear first in the output
     custom_descriptions = {}
@@ -244,6 +244,49 @@ class BaseResourceClass:
         # Could add more sophisticated default value detection here
         return "-"
 
+    def gen_data(self):
+        """
+        Generate structured data for rendering.
+
+        Returns:
+            dict: {
+                'resource_type': str,  # e.g., "aws_iam_role"
+                'resource_name': str,  # e.g., "lambda_role"
+                'resource_address': str,  # e.g., "aws_iam_role.lambda_role"
+                'attributes': [
+                    {
+                        'name': str,        # e.g., "assume_role_policy"
+                        'value': Any,       # e.g., "{...json...}"
+                        'required': str,    # "Yes" / "No" / "-"
+                        'default': str,     # "(computed)" / "false" / "-"
+                        'description': str, # 説明文
+                    },
+                    ...
+                ]
+            }
+        """
+        flattened = self._flatten_values(self.values)
+
+        attributes = []
+        for item in flattened:
+            attr_name = item['key']
+            attr_value = item['value']
+
+            attributes.append({
+                'name': attr_name,
+                'value': attr_value,
+                'required': self._get_required_status(attr_name),
+                'default': self._get_default_value(attr_name),
+                'description': self._get_description(attr_name),
+            })
+
+        return {
+            'resource_type': self.type,
+            'resource_name': self.name,
+            'resource_address': self.address,
+            'attributes': attributes,
+        }
+
     def gen_table(self):
         """
         Generate markdown table with columns:
@@ -282,7 +325,7 @@ class BaseResourceClass:
 class AWS_IAM_ROLE(BaseResourceClass):
     """IAM Role resource"""
 
-    sheet = "IAM.md"
+    view_class = "IAMView"
     generate_this_table = True
     priority = 100  # High priority for IAM resources
 
@@ -302,6 +345,24 @@ class AWS_IAM_ROLE(BaseResourceClass):
     def __init__(self, resource, schema=None, resource_registry=None, config=None):
         super().__init__(resource, schema, resource_registry, config)
         self.attached_policies = []  # Will be populated by attachment resources
+
+    def gen_data(self):
+        """
+        Override to include attached_policies in attributes.
+        """
+        data = super().gen_data()
+
+        # Add attached_policies to attributes
+        for i, policy_arn in enumerate(self.attached_policies):
+            data['attributes'].append({
+                'name': f'attached_policies[{i}]',
+                'value': policy_arn,
+                'required': '-',
+                'default': '-',
+                'description': self.custom_descriptions.get('attached_policies', ''),
+            })
+
+        return data
 
     def gen_table(self):
         """
@@ -342,7 +403,7 @@ class AWS_IAM_ROLE(BaseResourceClass):
 class AWS_IAM_POLICY(BaseResourceClass):
     """IAM Policy resource"""
 
-    sheet = "IAM.md"
+    view_class = "IAMView"
     generate_this_table = True
     priority = 90  # Slightly lower priority than IAM Role
 
@@ -359,7 +420,7 @@ class AWS_IAM_POLICY(BaseResourceClass):
 class AWS_S3_BUCKET(BaseResourceClass):
     """S3 Bucket resource"""
 
-    sheet = "S3.md"
+    view_class = "S3View"
     generate_this_table = True
     priority = 50  # Medium priority for storage resources
 
@@ -375,7 +436,7 @@ class AWS_S3_BUCKET(BaseResourceClass):
 class AWS_S3_BUCKET_CORS_CONFIGURATION(BaseResourceClass):
     """S3 Bucket CORS Configuration resource"""
 
-    sheet = "S3.md"
+    view_class = "S3View"
     generate_this_table = True
     priority = 45  # Medium priority, slightly lower than bucket
 
@@ -394,7 +455,7 @@ class AWS_S3_BUCKET_CORS_CONFIGURATION(BaseResourceClass):
 class AWS_S3_BUCKET_VERSIONING(BaseResourceClass):
     """S3 Bucket Versioning resource"""
 
-    sheet = "S3.md"
+    view_class = "S3View"
     generate_this_table = True
     priority = 45  # Medium priority, slightly lower than bucket
 

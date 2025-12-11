@@ -169,19 +169,21 @@ def process_resources(resources, resource_schemas, config_map=None):
 
 def generate_output_files(resource_registry, output_prefix):
     """
-    Generate markdown output files grouped by sheet attribute.
+    Generate HTML output files grouped by view_class attribute.
 
     Args:
         resource_registry: Dictionary of resource instances
         output_prefix: Output directory or file prefix
     """
-    # Group resources by sheet
-    sheets = defaultdict(list)
+    from lib import views
+
+    # Group resources by view_class
+    view_groups = defaultdict(list)
 
     for address, instance in resource_registry.items():
         if instance.generate_this_table:
-            sheet_name = instance.sheet
-            sheets[sheet_name].append(instance)
+            view_class_name = getattr(instance, 'view_class', 'DefaultView')
+            view_groups[view_class_name].append(instance)
 
     # Create output directory if it doesn't exist
     output_dir = output_prefix
@@ -195,33 +197,16 @@ def generate_output_files(resource_registry, output_prefix):
     else:
         os.makedirs(output_dir, exist_ok=True)
 
-    # Generate markdown file for each sheet
-    for sheet_name, instances in sheets.items():
-        output_file = os.path.join(output_dir, sheet_name)
+    # Generate HTML file for each view
+    for view_class_name, instances in view_groups.items():
+        # Get view class
+        view_class = getattr(views, view_class_name, views.DefaultView)
 
-        # Sort instances by priority (higher priority first), then by type, then by name
-        sorted_instances = sorted(
-            instances,
-            key=lambda x: (-x.priority, x.type, x.name)
-        )
+        # Create view instance
+        view = view_class(instances)
 
-        with open(output_file, 'w') as f:
-            # Write file header
-            resource_type_name = sorted_instances[0].type if sorted_instances else "Resources"
-            f.write(f"# {resource_type_name.upper()}\n\n")
-
-            # Write each resource's table
-            for instance in sorted_instances:
-                # Resource section header (format: resource_type.resource_name)
-                f.write(f"## {instance.type}.{instance.name}\n\n")
-
-                # Generate and write table
-                table = instance.gen_table()
-                if table:
-                    f.write(table)
-                    f.write("\n\n")
-
-        print(f"Generated: {output_file}")
+        # Write HTML file
+        view.write_file(output_dir)
 
 
 def main():

@@ -481,19 +481,19 @@
       ]
     },
     {
-      "resource": "aws_iam_role.lambda_role",
-      "attribute": [
-        "name"
-      ]
-    },
-    {
       "resource": "aws_iam_policy.s3_access_policy",
       "attribute": [
         "arn"
       ]
+    },
+    {
+      "resource": "aws_iam_role.lambda_role",
+      "attribute": [
+        "name"
+      ]
     }
   ],
-  "timestamp": "2025-12-09T13:34:23Z",
+  "timestamp": "2025-12-11T14:38:28Z",
   "applyable": true,
   "complete": true,
   "errored": false
