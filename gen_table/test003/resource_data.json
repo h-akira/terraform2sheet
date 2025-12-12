@@ -1,0 +1,36 @@
+{
+  "simple_string": "hello",
+  "simple_number": 42,
+  "simple_bool": true,
+  "shallow_array": ["a", "b", "c"],
+  "deep_nested": {
+    "level1": {
+      "level2": {
+        "level3": [
+          {
+            "items": [
+              {"name": "item1", "value": 100},
+              {"name": "item2", "value": 200}
+            ]
+          },
+          {
+            "items": [
+              {"name": "item3", "value": 300}
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "another_simple": "world",
+  "mixed_depth": [
+    {
+      "shallow_field": "x",
+      "deep_field": {
+        "nested": {
+          "value": "y"
+        }
+      }
+    }
+  ]
+}
