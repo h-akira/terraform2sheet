@@ -26,15 +26,15 @@ HTML出力
 
 1. **必要データ抽出** (`lib/data_extraction.py`)
    - 入力: `plan.json` (dict), `schema.json` (dict)
-   - 処理: schema.json をベースに `computed != true` の属性を抽出
+   - 処理: schema.json をベースに、computed-onlyでない属性（required/optionalな属性）を抽出
    - 出力: OriginValue インスタンスを含む辞書型データ
    - 警告: schema.json と plan.json の不整合を検出
 
 2. **View用データ整形** (`lib/formatting_data.py`)
    - 入力: OriginValue を含む中間データ、オプション設定
-   - 処理: OriginValue → ViewValue 変換、参照解決、description上書き、特殊処理、リソースタイプ検証
-   - 特殊処理例: `aws_iam_policy_attachment` を IAM Role に統合
-   - 出力: ViewValue を含む辞書型データ（address等の内部情報は除去済み）
+   - 処理: OriginValue → ViewValue 変換、参照解決、description上書き、table_type決定、特殊処理、リソースタイプ検証
+   - 特殊処理例: `aws_iam_role_policy_attachment` を IAM Role に統合
+   - 出力: ViewValue を含む辞書型データ（table_type含む、address等の内部情報は除去済み）
 
 3. **HTML View生成** (`lib/html_view.py`)
    - 入力: 整形済みデータ
@@ -237,14 +237,15 @@ class ViewValue:
    - 参照解決: `reference` フィールドを使って識別子を解決し `"(ref) identifier"` に変換
    - description上書き: カスタム description を指定された属性に適用
    - 不要データ除去: `address`, `required` などのメタデータを除去
-2. 特殊処理: リソースタイプ固有の処理
-3. リソースタイプ検証: 動作確認済みリソースタイプのチェック
+2. テーブル形式決定: リソースタイプに応じて `table_type` (individual/list) を決定
+3. 特殊処理: リソースタイプ固有の処理
+4. リソースタイプ検証: 動作確認済みリソースタイプのチェック
 
 **特殊処理の例**:
-- `aws_iam_policy_attachment`: 独立したリソースとして残さず、IAM Role に統合
+- `aws_iam_role_policy_attachment`: 独立したリソースとして残さず、IAM Role に統合
   - 対象の IAM Role に `attached_policies` 配列を追加
   - ポリシー情報を配列要素として格納
-  - 元の `aws_iam_policy_attachment` リソースは出力から除外
+  - 元の `aws_iam_role_policy_attachment` リソースは出力から除外
 
 **リソースタイプ検証**:
 - 動作確認済みリソースタイプの配列を定義（例: `VERIFIED_RESOURCE_TYPES`）
@@ -263,6 +264,7 @@ class ViewValue:
   {
     "resource_type": "aws_iam_role",
     "resource_name": "lambda",
+    "table_type": "list",  # リソースタイプに応じて決定
     "values": {
       "name": ViewValue(
         value="lambda-role",
@@ -277,6 +279,7 @@ class ViewValue:
   {
     "resource_type": "aws_iam_role_policy_attachment",
     "resource_name": "attach",
+    "table_type": "individual",
     "values": {
       "role": ViewValue(
         value="(ref) lambda-role",  # 参照解決済み
@@ -298,6 +301,7 @@ class ViewValue:
   {
     "resource_type": "aws_iam_role",
     "resource_name": "lambda",
+    "table_type": "list",
     "values": {
       "name": ViewValue(value="lambda-role", description="IAMロール名"),
       "assume_role_policy": ViewValue(value="...", description="AssumeRoleポリシー"),
@@ -324,8 +328,9 @@ class ViewValue:
 - **一覧型**: 複数リソースを1行ずつ表示（列幅固定、長いコンテンツは折りたたみ）
 
 **表示形式の決定**:
-- formatting_data の段階で、リソースタイプに応じて決定
-- 一覧型対象リソース例: `aws_iam_role`, `aws_iam_policy`, `aws_s3_bucket` 等
+- formatting_data の段階で、リソースタイプに応じて `table_type` を決定
+- 一覧型 (`table_type="list"`) 対象リソース例: `aws_iam_role`, `aws_iam_policy`, `aws_s3_bucket` 等
+- 個別型 (`table_type="individual"`) はそれ以外のリソースタイプ
 
 **共通仕様**:
 - 参照は `(ref)` プレフィックスで視覚的に区別
@@ -394,6 +399,7 @@ def format_data(extracted_data: list, options: dict = None) -> list:
           {
             "resource_type": str,  # "type" from input
             "resource_name": str,  # "name" from input
+            "table_type": str,  # "individual" or "list" - table format type
             "values": dict  # ViewValue instances at leaf nodes
           },
           ...
@@ -403,11 +409,12 @@ def format_data(extracted_data: list, options: dict = None) -> list:
     Processing:
         1. OriginValue → ViewValue conversion (resolve references, override descriptions)
         2. Remove internal metadata (module, address, required, etc.)
-        3. Apply special processing (e.g., merge aws_iam_policy_attachment)
-        4. Verify resource types
+        3. Determine table_type based on resource type
+        4. Apply special processing (e.g., merge aws_iam_role_policy_attachment)
+        5. Verify resource types
 
     Special processing:
-        - aws_iam_policy_attachment: Merged into IAM Role as "attached_policies"
+        - aws_iam_role_policy_attachment: Merged into IAM Role as "attached_policies"
         - (Future resource types can be added)
     """
     pass
